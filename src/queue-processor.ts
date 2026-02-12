@@ -69,6 +69,7 @@ interface Settings {
     };
     ollama?: {
         base_url?: string;
+        api_key?: string;
     };
 }
 
@@ -206,32 +207,58 @@ function resolveCodexModel(model: string): string {
 /**
  * Call Ollama API
  */
-async function callOllama(baseUrl: string, model: string, message: string): Promise<string> {
+async function callOllama(baseUrl: string, model: string, message: string, apiKey?: string): Promise<string> {
     try {
-        const url = `${baseUrl}/api/chat`;
-        const body = {
+        const url = `${baseUrl.replace(/\/v1\/?$/, '')}/v1/chat/completions`; // Adjust for OpenAI-compatible endpoint if needed, or keep standard
+        // Note: The search result said https://ollama.com/v1/ is the base.
+        // If using standard Ollama API it's /api/chat. But cloud might use /v1/chat/completions (OpenAI compat).
+        // Let's stick to the /api/chat for locally hosted compatible, 
+        // BUT if it's "Ollama Cloud", it might be OpenAI compatible?
+        // Let's assume standard Ollama API (/api/chat) for now unless base url ends in /v1.
+
+        let endpoint = `${baseUrl}/api/chat`;
+        let requestBody: any = {
             model: model,
             messages: [{ role: 'user', content: message }],
             stream: false
         };
-        
+
+        // Heuristic: if URL ends in /v1, use OpenAI format
+        if (baseUrl.endsWith('/v1')) {
+            endpoint = `${baseUrl}/chat/completions`;
+        }
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
         // Use global fetch (available in Node 20)
-        const response = await fetch(url, {
+        const response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            headers,
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
-            throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText} - ${errorText}`);
         }
 
         const data = await response.json() as any;
+
+        // Handle both Ollama format (message.content) and OpenAI format (choices[0].message.content)
+        if (data.choices && data.choices[0]?.message?.content) {
+            return data.choices[0].message.content;
+        }
         return data.message?.content || 'No response from Ollama';
     } catch (error) {
         throw new Error(`Ollama connection failed: ${(error as Error).message}`);
     }
 }
+
 
 /**
  * Get the reset flag path for a specific agent.
@@ -271,14 +298,14 @@ function parseAgentRouting(rawMessage: string, agents: Record<string, AgentConfi
         return {
             agentId: 'error',
             message: `🚀 **Agent-to-Agent Collaboration - Coming Soon!**\n\n` +
-                     `You mentioned multiple agents: ${agentList}\n\n` +
-                     `Right now, I can only route to one agent at a time. But we're working on something cool:\n\n` +
-                     `✨ **Multi-Agent Coordination** - Agents will be able to collaborate on complex tasks!\n` +
-                     `✨ **Smart Routing** - Send instructions to multiple agents at once!\n` +
-                     `✨ **Agent Handoffs** - One agent can delegate to another!\n\n` +
-                     `For now, please send separate messages to each agent:\n` +
-                     mentionedAgents.map(t => `• \`@${t} [your message]\``).join('\n') + '\n\n' +
-                     `_Stay tuned for updates! 🎉_`
+                `You mentioned multiple agents: ${agentList}\n\n` +
+                `Right now, I can only route to one agent at a time. But we're working on something cool:\n\n` +
+                `✨ **Multi-Agent Coordination** - Agents will be able to collaborate on complex tasks!\n` +
+                `✨ **Smart Routing** - Send instructions to multiple agents at once!\n` +
+                `✨ **Agent Handoffs** - One agent can delegate to another!\n\n` +
+                `For now, please send separate messages to each agent:\n` +
+                mentionedAgents.map(t => `• \`@${t} [your message]\``).join('\n') + '\n\n' +
+                `_Stay tuned for updates! 🎉_`
         };
     }
 
@@ -514,13 +541,14 @@ async function processMessage(messageFile: string): Promise<void> {
             } else if (provider === 'ollama') {
                 // Ollama provider
                 log('INFO', `Using Ollama provider (agent: ${agentId})`);
-                
-                const baseUrl = settings.ollama?.base_url || 'http://host.docker.internal:11434';
-                
+
+                const baseUrl = settings.ollama?.base_url || 'https://ollama.com';
+                const apiKey = settings.ollama?.api_key || process.env.OLLAMA_API_KEY;
+
                 // Note: Ollama implementation here is currently stateless (single-turn)
                 // TODO: Implement conversation history for Ollama
-                
-                response = await callOllama(baseUrl, agent.model, message);
+
+                response = await callOllama(baseUrl, agent.model, message, apiKey);
 
             } else {
                 // Default to Claude (Anthropic)

@@ -20,7 +20,8 @@ CHANNELS_ENABLED="[]"
 # Provider configuration
 DEFAULT_PROVIDER=${DEFAULT_PROVIDER:-anthropic}
 DEFAULT_MODEL=${DEFAULT_MODEL:-sonnet}
-OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+# Default to Ollama Cloud URL; user can override to http://host.docker.internal:11434 for local
+OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-https://ollama.com}
 
 # Construct JSON
 jq -n \
@@ -31,6 +32,7 @@ jq -n \
   --arg provider "$DEFAULT_PROVIDER" \
   --arg model "$DEFAULT_MODEL" \
   --arg ollama_url "$OLLAMA_BASE_URL" \
+  --arg ollama_key "$OLLAMA_API_KEY" \
   '{
     channels: {
       enabled: $enabled,
@@ -48,7 +50,8 @@ jq -n \
       openai: { model: $model }
     },
     ollama: {
-      base_url: $ollama_url
+      base_url: $ollama_url,
+      api_key: $ollama_key
     },
     monitoring: {
       heartbeat_interval: 3600
