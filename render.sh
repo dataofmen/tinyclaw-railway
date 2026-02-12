@@ -17,13 +17,20 @@ CHANNELS_ENABLED="[]"
 [ "$TELEGRAM_ENABLED" = "true" ] && CHANNELS_ENABLED=$(echo "$CHANNELS_ENABLED" | jq '. + ["telegram"]')
 [ "$WHATSAPP_ENABLED" = "true" ] && CHANNELS_ENABLED=$(echo "$CHANNELS_ENABLED" | jq '. + ["whatsapp"]')
 
+# Provider configuration
+DEFAULT_PROVIDER=${DEFAULT_PROVIDER:-anthropic}
+DEFAULT_MODEL=${DEFAULT_MODEL:-sonnet}
+OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+
 # Construct JSON
 jq -n \
   --argjson enabled "$CHANNELS_ENABLED" \
   --arg discord_token "$DISCORD_BOT_TOKEN" \
   --arg telegram_token "$TELEGRAM_BOT_TOKEN" \
   --arg workspace "$WORKSPACE_PATH" \
-  --arg model "${DEFAULT_MODEL:-sonnet}" \
+  --arg provider "$DEFAULT_PROVIDER" \
+  --arg model "$DEFAULT_MODEL" \
+  --arg ollama_url "$OLLAMA_BASE_URL" \
   '{
     channels: {
       enabled: $enabled,
@@ -36,8 +43,12 @@ jq -n \
       name: "tinyclaw-workspace"
     },
     models: {
-      provider: "anthropic",
-      anthropic: { model: $model }
+      provider: $provider,
+      anthropic: { model: $model },
+      openai: { model: $model }
+    },
+    ollama: {
+      base_url: $ollama_url
     },
     monitoring: {
       heartbeat_interval: 3600

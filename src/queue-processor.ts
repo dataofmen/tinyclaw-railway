@@ -67,6 +67,9 @@ interface Settings {
     monitoring?: {
         heartbeat_interval?: number;
     };
+    ollama?: {
+        base_url?: string;
+    };
 }
 
 function getSettings(): Settings {
@@ -82,6 +85,9 @@ function getSettings(): Settings {
             } else if (settings?.models?.anthropic) {
                 if (!settings.models) settings.models = {};
                 settings.models.provider = 'anthropic';
+            } else if (settings?.ollama) {
+                if (!settings.models) settings.models = {};
+                settings.models.provider = 'ollama';
             }
         }
 
@@ -195,6 +201,36 @@ function resolveClaudeModel(model: string): string {
  */
 function resolveCodexModel(model: string): string {
     return CODEX_MODEL_IDS[model] || model || '';
+}
+
+/**
+ * Call Ollama API
+ */
+async function callOllama(baseUrl: string, model: string, message: string): Promise<string> {
+    try {
+        const url = `${baseUrl}/api/chat`;
+        const body = {
+            model: model,
+            messages: [{ role: 'user', content: message }],
+            stream: false
+        };
+        
+        // Use global fetch (available in Node 20)
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json() as any;
+        return data.message?.content || 'No response from Ollama';
+    } catch (error) {
+        throw new Error(`Ollama connection failed: ${(error as Error).message}`);
+    }
 }
 
 /**
@@ -475,6 +511,17 @@ async function processMessage(messageFile: string): Promise<void> {
                 if (!response) {
                     response = 'Sorry, I could not generate a response from Codex.';
                 }
+            } else if (provider === 'ollama') {
+                // Ollama provider
+                log('INFO', `Using Ollama provider (agent: ${agentId})`);
+                
+                const baseUrl = settings.ollama?.base_url || 'http://host.docker.internal:11434';
+                
+                // Note: Ollama implementation here is currently stateless (single-turn)
+                // TODO: Implement conversation history for Ollama
+                
+                response = await callOllama(baseUrl, agent.model, message);
+
             } else {
                 // Default to Claude (Anthropic)
                 log('INFO', `Using Claude provider (agent: ${agentId})`);
@@ -498,7 +545,7 @@ async function processMessage(messageFile: string): Promise<void> {
                 response = await runCommand('claude', claudeArgs, workingDir);
             }
         } catch (error) {
-            log('ERROR', `${provider === 'openai' ? 'Codex' : 'Claude'} error (agent: ${agentId}): ${(error as Error).message}`);
+            log('ERROR', `${provider} error (agent: ${agentId}): ${(error as Error).message}`);
             response = "Sorry, I encountered an error processing your request. Please check the queue logs.";
         }
 
